@@ -1,0 +1,60 @@
+name: Publicar LightCraft web
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar Rust y el destino WebAssembly
+        run: |
+          rustup toolchain install stable --profile minimal --target wasm32-unknown-unknown
+          rustup default stable
+          rustc --version
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Instalar wasm-bindgen (la versión exacta de Cargo.lock)
+        run: |
+          V="$(awk '$0 == "name = \"wasm-bindgen\"" { getline; gsub(/version = |"/, ""); print; exit }' Cargo.lock)"
+          echo "wasm-bindgen $V"
+          cargo install wasm-bindgen-cli --version "$V" --locked
+
+      - name: Compilar la versión web
+        run: cargo xtask web
+
+      - name: Preparar el sitio
+        id: site
+        run: |
+          SITE="$(find . -maxdepth 3 -type d -name web-site | head -n 1)"
+          test -f "$SITE/index.html"
+          touch "$SITE/.nojekyll"
+          ls -la "$SITE"
+          echo "path=$SITE" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: ${{ steps.site.outputs.path }}
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
